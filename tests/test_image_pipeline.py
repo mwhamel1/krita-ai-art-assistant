@@ -13,7 +13,9 @@ if str(_ROOT) not in sys.path:
 from ai_art_assistant.image_pipeline import (
     CoverageError,
     DimensionError,
+    api_size_string,
     export_directory,
+    openai_mask_rgba_from_coverage,
     png_dimensions,
     require_coverage_size,
     require_same_size,
@@ -60,6 +62,17 @@ class CoverageTests(unittest.TestCase):
         with self.assertRaises(CoverageError):
             require_coverage_size(b"\x00\x01", 2, 2)
 
+    def test_openai_mask_inverts_coverage_to_alpha(self):
+        coverage = bytes([0, 64, 128, 255])
+        rgba = openai_mask_rgba_from_coverage(coverage, 2, 2)
+        alphas = list(rgba[3::4])
+        self.assertEqual(alphas, [255, 191, 127, 0])
+        self.assertEqual(rgba[0:3], b"\x00\x00\x00")
+
+    def test_full_selection_is_fully_transparent_for_openai(self):
+        rgba = openai_mask_rgba_from_coverage(bytes([255, 255, 255, 255]), 2, 2)
+        self.assertEqual(list(rgba[3::4]), [0, 0, 0, 0])
+
 
 class PngTests(unittest.TestCase):
     def test_rgba_roundtrip_dimensions(self):
@@ -75,6 +88,19 @@ class PngTests(unittest.TestCase):
             path = Path(folder) / "gray.png"
             write_png_gray(path, gray, 2, 2)
             self.assertEqual(png_dimensions(path), (2, 2))
+
+
+class ApiSizeTests(unittest.TestCase):
+    def test_card_size_is_allowed(self):
+        self.assertEqual(api_size_string(1024, 1536), "1024x1536")
+
+    def test_non_multiple_of_16_is_rejected(self):
+        with self.assertRaises(DimensionError):
+            api_size_string(1000, 1536)
+
+    def test_tiny_document_is_rejected(self):
+        with self.assertRaises(DimensionError):
+            api_size_string(512, 512)
 
 
 class ExportDirectoryTests(unittest.TestCase):

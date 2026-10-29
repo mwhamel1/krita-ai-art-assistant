@@ -66,6 +66,47 @@ def stencil_rgba_from_coverage(coverage: bytes, width: int, height: int) -> byte
     return bytes(out)
 
 
+def openai_mask_rgba_from_coverage(coverage: bytes, width: int, height: int) -> bytes:
+    """OpenAI Image Edit: alpha 0 means 'edit this pixel'. Invert Krita coverage."""
+    require_coverage_size(coverage, width, height)
+    out = bytearray(width * height * 4)
+    for index, value in enumerate(coverage):
+        offset = index * 4
+        out[offset] = 0
+        out[offset + 1] = 0
+        out[offset + 2] = 0
+        out[offset + 3] = 255 - value
+    return bytes(out)
+
+
+def api_size_string(width: int, height: int) -> str:
+    """Return WIDTHxHEIGHT if OpenAI Image Edit can use it. Never stretch."""
+    if width <= 0 or height <= 0:
+        raise DimensionError("The document has no pixel size.")
+    if width % 16 != 0 or height % 16 != 0:
+        raise DimensionError(
+            f"OpenAI needs width and height in multiples of 16. "
+            f"This document is {width}×{height}."
+        )
+    if width > 3840 or height > 3840:
+        raise DimensionError(
+            f"OpenAI rejects edges over 3840 pixels. This document is {width}×{height}."
+        )
+    ratio = width / height
+    if ratio < 1 / 3 or ratio > 3:
+        raise DimensionError(
+            f"OpenAI only allows aspect ratios between 1:3 and 3:1. "
+            f"This document is {width}×{height}."
+        )
+    pixels = width * height
+    if pixels < 655_360 or pixels > 8_294_400:
+        raise DimensionError(
+            f"OpenAI pixel count must be between 655,360 and 8,294,400. "
+            f"This document is {width}×{height} ({pixels} pixels)."
+        )
+    return f"{width}x{height}"
+
+
 def png_dimensions(path: str | Path) -> tuple[int, int]:
     with Path(path).open("rb") as handle:
         signature = handle.read(8)
