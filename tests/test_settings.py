@@ -11,7 +11,14 @@ _ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from ai_art_assistant.settings import load_settings, save_settings, settings_path
+from ai_art_assistant.settings import (
+    append_request_log,
+    load_settings,
+    remember_prompt,
+    request_log_path,
+    save_settings,
+    settings_path,
+)
 
 
 class SettingsTests(unittest.TestCase):
@@ -34,6 +41,59 @@ class SettingsTests(unittest.TestCase):
                 loaded = load_settings()
                 self.assertEqual(loaded["quality"], "low")
                 self.assertEqual(loaded["base_prompt"], "Keep it painterly.")
+                self.assertEqual(loaded["prompt_history"], [])
+                self.assertEqual(loaded["generate_warn_after"], 5)
+            finally:
+                if previous is None:
+                    del os.environ["LOCALAPPDATA"]
+                else:
+                    os.environ["LOCALAPPDATA"] = previous
+
+    def test_prompt_history_roundtrip_and_newest_first(self):
+        with tempfile.TemporaryDirectory() as folder:
+            previous = os.environ.get("LOCALAPPDATA")
+            os.environ["LOCALAPPDATA"] = folder
+            try:
+                history = remember_prompt([], "Turn the cloak red")
+                history = remember_prompt(history, "Add gold trim")
+                history = remember_prompt(history, "Turn the cloak red")
+                save_settings({"prompt_history": history, "quality": "low"})
+                loaded = load_settings()
+                self.assertEqual(
+                    loaded["prompt_history"][:2],
+                    ["Turn the cloak red", "Add gold trim"],
+                )
+            finally:
+                if previous is None:
+                    del os.environ["LOCALAPPDATA"]
+                else:
+                    os.environ["LOCALAPPDATA"] = previous
+
+    def test_request_log_omits_secrets_and_fake_prices(self):
+        with tempfile.TemporaryDirectory() as folder:
+            previous = os.environ.get("LOCALAPPDATA")
+            os.environ["LOCALAPPDATA"] = folder
+            try:
+                append_request_log(
+                    {
+                        "time": "2026-10-28T12:00:00",
+                        "document": "card.kra",
+                        "quality": "low",
+                        "scope": "selection",
+                        "outcome": "ok",
+                        "api_key": "sk-should-never-be-logged",
+                        "cost": "$0.04",
+                    }
+                )
+                text = request_log_path().read_text(encoding="utf-8")
+                self.assertNotIn("sk-should-never-be-logged", text)
+                self.assertNotIn("api_key", text)
+                self.assertNotIn("$0.04", text)
+                self.assertNotIn("cost", text)
+                row = json.loads(text.strip())
+                self.assertEqual(row["document"], "card.kra")
+                self.assertEqual(row["scope"], "selection")
+                self.assertEqual(row["outcome"], "ok")
             finally:
                 if previous is None:
                     del os.environ["LOCALAPPDATA"]

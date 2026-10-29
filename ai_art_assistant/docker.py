@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from pathlib import Path
 
 try:
@@ -17,6 +18,7 @@ try:
         QHBoxLayout,
         QLabel,
         QLineEdit,
+        QMessageBox,
         QPushButton,
         QScrollArea,
         QTextEdit,
@@ -28,6 +30,8 @@ try:
     KEEP_ASPECT = Qt.AspectRatioMode.KeepAspectRatio
     SMOOTH = Qt.TransformationMode.SmoothTransformation
     ECHO_PASSWORD = QLineEdit.EchoMode.Password
+    MSG_YES = QMessageBox.StandardButton.Yes
+    MSG_NO = QMessageBox.StandardButton.No
 except Exception:
     from PyQt5.QtCore import Qt, QThread, QUrl, pyqtSignal
     from PyQt5.QtGui import QDesktopServices, QPixmap
@@ -38,6 +42,7 @@ except Exception:
         QHBoxLayout,
         QLabel,
         QLineEdit,
+        QMessageBox,
         QPushButton,
         QScrollArea,
         QTextEdit,
@@ -49,6 +54,8 @@ except Exception:
     KEEP_ASPECT = Qt.KeepAspectRatio
     SMOOTH = Qt.SmoothTransformation
     ECHO_PASSWORD = QLineEdit.Password
+    MSG_YES = QMessageBox.Yes
+    MSG_NO = QMessageBox.No
 
 from krita import DockWidget, Krita
 
@@ -67,6 +74,7 @@ from .krita_document import (
     LayerImportError,
     NoDocumentError,
     NoSelectionError,
+    clip_candidate_png_to_stencil,
     default_edit_layer_name,
     default_import_layer_name,
     document_identity,
@@ -77,7 +85,13 @@ from .krita_document import (
 )
 from .openai_provider import OpenAIRequestError, edit_image
 from .prompts import EmptyInstructionError, compose_edit_prompt
-from .settings import ALLOWED_QUALITIES, load_settings, save_settings
+from .settings import (
+    ALLOWED_QUALITIES,
+    append_request_log,
+    load_settings,
+    remember_prompt,
+    save_settings,
+)
 
 try:
     from builtins import i18n
@@ -150,7 +164,15 @@ class AIArtAssistantDocker(DockWidget):
         self._last_stencil_path = ""
         self._candidate_path = ""
         self._job_snapshot = None
+        self._job_stencil_path = ""
+        self._job_scope = "whole-canvas"
+        self._job_quality = "medium"
+        self._job_document_name = ""
+        self._job_width = 0
+        self._job_height = 0
         self._job_running = False
+        self._cancel_requested = False
+        self._session_generates = 0
         self._worker = None
         self._settings = load_settings()
 
@@ -201,6 +223,12 @@ class AIArtAssistantDocker(DockWidget):
             QLabel(i18n("Generate uploads the visible canvas (and mask) to OpenAI."))
         )
         generate_layout.addWidget(QLabel(i18n("Instruction")))
+        self.history_combo = QComboBox()
+        self.history_combo.setToolTip(
+            i18n("Recent instructions saved on this PC. Pictures are not stored.")
+        )
+        self.history_combo.currentIndexChanged.connect(self._reuse_history)
+        generate_layout.addWidget(self.history_combo)
         self.prompt_edit = QTextEdit()
         self.prompt_edit.setPlaceholderText(
             i18n("Example: Turn the selected armor into ancient leather.")
@@ -232,9 +260,21 @@ class AIArtAssistantDocker(DockWidget):
             QLabel(i18n("Model: gpt-image-2.5-flare (one image per Generate click)"))
         )
 
+        generate_row = QHBoxLayout()
         self.generate_button = QPushButton(i18n("Generate"))
         self.generate_button.clicked.connect(self._generate)
-        generate_layout.addWidget(self.generate_button)
+        self.cancel_button = QPushButton(i18n("Cancel"))
+        self.cancel_button.setToolTip(
+            i18n(
+                "Ignore the result when it returns. If OpenAI already started, "
+                "that click may still be billed."
+            )
+        )
+        self.cancel_button.clicked.connect(self._cancel_generate)
+        self.cancel_button.setEnabled(False)
+        generate_row.addWidget(self.generate_button)
+        generate_row.addWidget(self.cancel_button)
+        generate_layout.addLayout(generate_row)
 
         candidate_row = QHBoxLayout()
         self.apply_button = QPushButton(i18n("Apply as new layer"))
@@ -294,6 +334,7 @@ class AIArtAssistantDocker(DockWidget):
         self.setWidget(scroll)
 
         self._refresh_key_status()
+        self._refresh_history_combo()
         self._set_candidate_buttons(False)
         self.refresh_document_info()
 
@@ -349,7 +390,7 @@ class AIArtAssistantDocker(DockWidget):
                 self._set_status(
                     i18n(
                         "Generate sends the visible canvas to OpenAI (one paid request). "
-                        "A selection is guidance only in this version; clipping comes later."
+                        "If you have a selection, preview and Apply clip to that box locally."
                     )
                 )
         except Exception as exc:
@@ -368,6 +409,7 @@ class AIArtAssistantDocker(DockWidget):
             and not self._job_running
         )
         self.generate_button.setEnabled(ok)
+        self.cancel_button.setEnabled(self._job_running)
         if not has_document:
             self.generate_button.setToolTip(i18n("Open a drawing first."))
         elif not has_api_key():
@@ -405,29 +447,49 @@ class AIArtAssistantDocker(DockWidget):
             self._update_generate_enabled(True)
             return
         try:
+            has_selection = document.selection() is not None
             prompt = compose_edit_prompt(
                 self.base_prompt_edit.toPlainText(),
                 self.prompt_edit.toPlainText(),
-                document.selection() is not None,
+                has_selection,
             )
             size = api_size_string(document.width(), document.height())
+            if not self._confirm_session_spend():
+                self._set_status(i18n("Generate cancelled. Nothing was sent."))
+                return
             image_path = new_export_path("visible")
             export_visible_png(document, image_path)
             mask_path = ""
-            if document.selection() is not None:
+            self._job_stencil_path = ""
+            self._job_scope = "selection" if has_selection else "whole-canvas"
+            if has_selection:
+                stencil_file = new_export_path("stencil")
+                export_selection_stencil_png(document, stencil_file)
+                self._job_stencil_path = str(stencil_file)
                 mask_file = new_export_path("openai-mask")
                 export_openai_mask_png(document, mask_file)
                 mask_path = str(mask_file)
+            instruction = self.prompt_edit.toPlainText()
+            self._settings["prompt_history"] = remember_prompt(
+                self._settings.get("prompt_history") or [], instruction
+            )
             self._persist_prefs_quietly()
+            self._refresh_history_combo()
             self._job_snapshot = document_identity(document)
+            self._job_quality = self.quality_combo.currentText() or "medium"
+            self._job_document_name = _document_display_name(document)
+            self._job_width = document.width()
+            self._job_height = document.height()
             self._job_running = True
+            self._cancel_requested = False
             self._candidate_path = ""
             self._set_candidate_buttons(False)
             self._update_generate_enabled(True)
             self._set_status(
                 i18n(
                     "Uploading the visible canvas to OpenAI. This spends API credits. "
-                    "One click is one image. Krita should stay usable."
+                    "One click is one image. Krita should stay usable. Cancel ignores "
+                    "the result; it does not stop a request that already started."
                 )
             )
             worker = GenerateWorker(
@@ -436,7 +498,7 @@ class AIArtAssistantDocker(DockWidget):
                 mask_path=mask_path,
                 prompt=prompt,
                 model=self._settings.get("model", "gpt-image-2.5-flare"),
-                quality=self.quality_combo.currentText() or "medium",
+                quality=self._job_quality,
                 size=size,
                 width=document.width(),
                 height=document.height(),
@@ -444,6 +506,7 @@ class AIArtAssistantDocker(DockWidget):
             worker.succeeded.connect(self._on_generate_ok)
             worker.failed.connect(self._on_generate_error)
             self._worker = worker
+            self._session_generates += 1
             worker.start()
         except (
             EmptyInstructionError,
@@ -454,25 +517,65 @@ class AIArtAssistantDocker(DockWidget):
             CoverageError,
         ) as exc:
             self._job_running = False
+            self._cancel_requested = False
             self._set_status(str(exc))
             self._update_generate_enabled(document is not None)
         except Exception as exc:
             self._job_running = False
+            self._cancel_requested = False
             self._set_status(i18n("Could not start Generate: {error}").format(error=exc))
             self._update_generate_enabled(document is not None)
 
     def _on_generate_ok(self, path: str):
         self._job_running = False
-        self._candidate_path = path
-        self._show_preview(Path(path))
-        self._set_candidate_buttons(True)
         self._update_generate_enabled(_active_document() is not None)
-        extra = ""
-        if _active_document() is not None and _active_document().selection() is not None:
-            extra = i18n(
-                " A selection was sent as guidance; the result may still change "
-                "pixels outside the box until a later version clips it."
+        if self._cancel_requested:
+            self._cancel_requested = False
+            self._candidate_path = ""
+            self._set_candidate_buttons(False)
+            self.preview_label.setText(
+                i18n("No preview. The cancelled result was ignored.")
             )
+            self._log_request("cancelled")
+            self._set_status(
+                i18n(
+                    "Generate cancelled. The result was ignored. "
+                    "If OpenAI already started, that click may still have been billed."
+                )
+            )
+            return
+        apply_path = path
+        if self._job_stencil_path:
+            try:
+                overlay = new_export_path("overlay")
+                clip_candidate_png_to_stencil(
+                    path,
+                    self._job_stencil_path,
+                    overlay,
+                    self._job_width,
+                    self._job_height,
+                )
+                apply_path = str(overlay)
+            except Exception as exc:
+                self._candidate_path = ""
+                self._set_candidate_buttons(False)
+                self._log_request("error")
+                self._set_status(
+                    i18n(
+                        "The AI image returned, but clipping to the selection failed: {error}"
+                    ).format(error=exc)
+                )
+                return
+        self._candidate_path = apply_path
+        self._show_preview(Path(apply_path))
+        self._set_candidate_buttons(True)
+        extra = ""
+        if self._job_stencil_path:
+            extra = i18n(
+                " Preview and Apply are clipped to the selection from the moment "
+                "you pressed Generate. Outside that box the new layer stays empty."
+            )
+        self._log_request("ok")
         self._set_status(
             i18n("Candidate ready. Apply as a new layer, Discard, or Retry (Retry costs again).{extra}").format(
                 extra=extra
@@ -484,7 +587,59 @@ class AIArtAssistantDocker(DockWidget):
         self._candidate_path = ""
         self._set_candidate_buttons(False)
         self._update_generate_enabled(_active_document() is not None)
+        if self._cancel_requested:
+            self._cancel_requested = False
+            self._log_request("cancelled")
+            self._set_status(
+                i18n(
+                    "Generate cancelled. If OpenAI already started, that click may "
+                    "still have been billed. {error}"
+                ).format(error=message)
+            )
+            return
+        self._log_request("error")
         self._set_status(message)
+
+    def _cancel_generate(self):
+        if not self._job_running:
+            return
+        self._cancel_requested = True
+        self._set_status(
+            i18n(
+                "Cancel requested. Krita stays usable. If OpenAI already started, "
+                "that click may still be billed. The result will be ignored."
+            )
+        )
+
+    def _confirm_session_spend(self) -> bool:
+        warn_after = int(self._settings.get("generate_warn_after", 5))
+        if self._session_generates < warn_after:
+            return True
+        answer = QMessageBox.question(
+            self,
+            i18n("Spend another credit?"),
+            i18n(
+                "You have already sent {n} Generate requests this Krita session. "
+                "This spends another API credit. Continue?"
+            ).format(n=self._session_generates),
+            MSG_YES | MSG_NO,
+            MSG_NO,
+        )
+        return answer == MSG_YES
+
+    def _log_request(self, outcome: str):
+        try:
+            append_request_log(
+                {
+                    "time": datetime.now().isoformat(timespec="seconds"),
+                    "document": self._job_document_name,
+                    "quality": self._job_quality,
+                    "scope": self._job_scope,
+                    "outcome": outcome,
+                }
+            )
+        except OSError:
+            pass
 
     def _apply_candidate(self):
         try:
@@ -513,20 +668,21 @@ class AIArtAssistantDocker(DockWidget):
                     "Original layers were not overwritten."
                 ).format(extra=extra)
             )
-            self._candidate_path = ""
-            self._job_snapshot = None
-            self._set_candidate_buttons(False)
+            self._clear_candidate_state()
         except (NoDocumentError, LayerImportError, DimensionError) as exc:
             self._set_status(str(exc))
         except Exception as exc:
             self._set_status(i18n("Apply failed: {error}").format(error=exc))
 
     def _discard_candidate(self):
+        self._clear_candidate_state()
+        self.preview_label.setText(i18n("Candidate discarded. Originals were not changed."))
+        self._set_status(i18n("Candidate discarded."))
+
+    def _clear_candidate_state(self):
         self._candidate_path = ""
         self._job_snapshot = None
         self._set_candidate_buttons(False)
-        self.preview_label.setText(i18n("Candidate discarded. Originals were not changed."))
-        self._set_status(i18n("Candidate discarded."))
 
     def _export_visible(self):
         try:
@@ -646,6 +802,20 @@ class AIArtAssistantDocker(DockWidget):
         self._settings["base_prompt"] = self.base_prompt_edit.toPlainText()
         self._settings["quality"] = self.quality_combo.currentText() or "medium"
         save_settings(self._settings)
+
+    def _refresh_history_combo(self):
+        self.history_combo.blockSignals(True)
+        self.history_combo.clear()
+        self.history_combo.addItem(i18n("Reuse a recent instruction\u2026"))
+        for item in self._settings.get("prompt_history") or []:
+            self.history_combo.addItem(item)
+        self.history_combo.setCurrentIndex(0)
+        self.history_combo.blockSignals(False)
+
+    def _reuse_history(self, index: int):
+        if index <= 0:
+            return
+        self.prompt_edit.setPlainText(self.history_combo.itemText(index))
 
     def _refresh_key_status(self):
         if has_api_key():

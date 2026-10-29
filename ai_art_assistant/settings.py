@@ -14,6 +14,8 @@ ALLOWED_MODELS = ("gpt-image-2.5-flare",)
 ALLOWED_QUALITIES = ("low", "medium", "high")
 DEFAULT_MODEL = "gpt-image-2.5-flare"
 DEFAULT_QUALITY = "medium"
+DEFAULT_GENERATE_WARN_AFTER = 5
+PROMPT_HISTORY_LIMIT = 8
 
 
 def settings_directory() -> Path:
@@ -32,7 +34,37 @@ def default_settings() -> dict:
         "model": DEFAULT_MODEL,
         "quality": DEFAULT_QUALITY,
         "base_prompt": DEFAULT_BASE_PROMPT,
+        "prompt_history": [],
+        "generate_warn_after": DEFAULT_GENERATE_WARN_AFTER,
     }
+
+
+def remember_prompt(history, instruction: str, limit: int = PROMPT_HISTORY_LIMIT) -> list:
+    text = (instruction or "").strip()
+    items = [str(item).strip() for item in (history or []) if str(item).strip()]
+    if not text:
+        return items[:limit]
+    if text in items:
+        items.remove(text)
+    items.insert(0, text)
+    return items[:limit]
+
+
+def request_log_path() -> Path:
+    return settings_directory() / "request_log.jsonl"
+
+
+def append_request_log(entry: dict) -> None:
+    clean = {
+        "time": str(entry.get("time") or ""),
+        "document": str(entry.get("document") or ""),
+        "quality": str(entry.get("quality") or ""),
+        "scope": str(entry.get("scope") or ""),
+        "outcome": str(entry.get("outcome") or ""),
+    }
+    path = request_log_path()
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(clean, ensure_ascii=False) + "\n")
 
 
 def load_settings() -> dict:
@@ -55,6 +87,14 @@ def load_settings() -> dict:
     data["model"] = model if model in ALLOWED_MODELS else DEFAULT_MODEL
     data["quality"] = quality if quality in ALLOWED_QUALITIES else DEFAULT_QUALITY
     data["base_prompt"] = str(base_prompt) if base_prompt is not None else DEFAULT_BASE_PROMPT
+    history = raw.get("prompt_history") or []
+    if isinstance(history, list):
+        data["prompt_history"] = remember_prompt(history, "")
+    try:
+        warn_after = int(raw.get("generate_warn_after", DEFAULT_GENERATE_WARN_AFTER))
+    except (TypeError, ValueError):
+        warn_after = DEFAULT_GENERATE_WARN_AFTER
+    data["generate_warn_after"] = max(1, min(100, warn_after))
     return data
 
 
@@ -65,5 +105,11 @@ def save_settings(data: dict) -> None:
     clean["model"] = model if model in ALLOWED_MODELS else DEFAULT_MODEL
     clean["quality"] = quality if quality in ALLOWED_QUALITIES else DEFAULT_QUALITY
     clean["base_prompt"] = str(data.get("base_prompt") or DEFAULT_BASE_PROMPT)
+    clean["prompt_history"] = remember_prompt(data.get("prompt_history") or [], "")
+    try:
+        warn_after = int(data.get("generate_warn_after", DEFAULT_GENERATE_WARN_AFTER))
+    except (TypeError, ValueError):
+        warn_after = DEFAULT_GENERATE_WARN_AFTER
+    clean["generate_warn_after"] = max(1, min(100, warn_after))
     path = settings_path()
     path.write_text(json.dumps(clean, indent=2) + "\n", encoding="utf-8")

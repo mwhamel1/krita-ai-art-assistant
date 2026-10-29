@@ -17,6 +17,7 @@ from krita import InfoObject
 
 from .image_pipeline import (
     DimensionError,
+    clip_candidate_rgba_to_coverage,
     openai_mask_rgba_from_coverage,
     png_dimensions,
     require_coverage_size,
@@ -43,7 +44,24 @@ class LayerImportError(RuntimeError):
 
 
 def _qimage_format_argb32():
-    return QImage.Format.Format_ARGB32
+    try:
+        return QImage.Format.Format_ARGB32
+    except AttributeError:
+        return QImage.Format_ARGB32
+
+
+def _qimage_format_rgba8888():
+    try:
+        return QImage.Format.Format_RGBA8888
+    except AttributeError:
+        return QImage.Format_RGBA8888
+
+
+def _qimage_format_gray8():
+    try:
+        return QImage.Format.Format_Grayscale8
+    except AttributeError:
+        return QImage.Format_Grayscale8
 
 
 def _as_bytes(data) -> bytes:
@@ -220,6 +238,64 @@ def document_identity(document) -> tuple:
                 name = ""
         name = name or "Untitled"
     return (name, document.width(), document.height())
+
+
+def clip_candidate_png_to_stencil(
+    candidate_path: str | Path,
+    stencil_path: str | Path,
+    dest_path: str | Path,
+    width: int,
+    height: int,
+) -> Path:
+    """Write an overlay PNG: AI RGB, alpha from the Generate-time stencil."""
+    candidate_path = Path(candidate_path)
+    stencil_path = Path(stencil_path)
+    dest_path = Path(dest_path)
+    candidate = QImage(str(candidate_path))
+    if candidate.isNull():
+        raise LayerImportError(f"Could not read AI result: {candidate_path}")
+    require_same_size(candidate.width(), candidate.height(), width, height)
+    stencil = QImage(str(stencil_path))
+    if stencil.isNull():
+        raise LayerImportError(f"Could not read selection stencil: {stencil_path}")
+    require_same_size(stencil.width(), stencil.height(), width, height)
+    rgba = _packed_rgba(candidate)
+    coverage = _packed_gray(stencil)
+    clipped = clip_candidate_rgba_to_coverage(rgba, coverage, width, height)
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    write_png_rgba(dest_path, clipped, width, height)
+    return dest_path
+
+
+def _packed_rgba(image: QImage) -> bytes:
+    converted = image.convertToFormat(_qimage_format_rgba8888())
+    width = converted.width()
+    height = converted.height()
+    bytes_per_line = converted.bytesPerLine()
+    src = _qimage_raw_bytes(converted)
+    row = width * 4
+    if bytes_per_line == row:
+        return src[: row * height]
+    packed = bytearray(row * height)
+    for y in range(height):
+        start = y * bytes_per_line
+        packed[y * row : (y + 1) * row] = src[start : start + row]
+    return bytes(packed)
+
+
+def _packed_gray(image: QImage) -> bytes:
+    converted = image.convertToFormat(_qimage_format_gray8())
+    width = converted.width()
+    height = converted.height()
+    bytes_per_line = converted.bytesPerLine()
+    src = _qimage_raw_bytes(converted)
+    if bytes_per_line == width:
+        return src[: width * height]
+    packed = bytearray(width * height)
+    for y in range(height):
+        start = y * bytes_per_line
+        packed[y * width : (y + 1) * width] = src[start : start + width]
+    return bytes(packed)
 
 
 def export_openai_mask_png(document, path: str | Path) -> None:
