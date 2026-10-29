@@ -41,7 +41,7 @@ With a selection, the upload is the selected sketch plus a 64px real-pixel margi
 | Image pipeline (`image_pipeline.py`) | PNG size checks, coverage, mask invert, clip, crop rect | Phase 4a |
 | Prompts (`prompts.py`) | Base prompt + rules + instruction; selection is a whole-sketch edit | Phase 4a |
 | Credentials (`credentials.py`) | Windows Credential Manager / session key | Phase 2 |
-| Settings (`settings.py`) | Non-secret defaults, prompt history, request log | Phase 3 |
+| Settings (`settings.py`) | Non-secret defaults, prompt history, request log, flare/sunburst | Phase 4a |
 | OpenAI adapter (`openai_provider.py`) | Stdlib HTTPS Image Edit | Phase 2 |
 | Strict selection composite | Clip applied pixels to the Generate-time stencil | Phase 3 |
 

@@ -43,6 +43,24 @@ class SettingsTests(unittest.TestCase):
                 self.assertEqual(loaded["base_prompt"], "Keep it painterly.")
                 self.assertEqual(loaded["prompt_history"], [])
                 self.assertEqual(loaded["generate_warn_after"], 5)
+                self.assertEqual(loaded["model"], "gpt-image-2.5-flare")
+            finally:
+                if previous is None:
+                    del os.environ["LOCALAPPDATA"]
+                else:
+                    os.environ["LOCALAPPDATA"] = previous
+
+    def test_sunburst_roundtrips_and_unknown_model_falls_back_to_flare(self):
+        with tempfile.TemporaryDirectory() as folder:
+            previous = os.environ.get("LOCALAPPDATA")
+            os.environ["LOCALAPPDATA"] = folder
+            try:
+                save_settings({"model": "gpt-image-2.5-sunburst", "quality": "low"})
+                loaded = load_settings()
+                self.assertEqual(loaded["model"], "gpt-image-2.5-sunburst")
+                save_settings({"model": "gpt-image-not-a-real-model", "quality": "low"})
+                loaded = load_settings()
+                self.assertEqual(loaded["model"], "gpt-image-2.5-flare")
             finally:
                 if previous is None:
                     del os.environ["LOCALAPPDATA"]

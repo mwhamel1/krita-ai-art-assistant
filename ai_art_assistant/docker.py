@@ -21,6 +21,7 @@ try:
         QMessageBox,
         QPushButton,
         QScrollArea,
+        QSizePolicy,
         QTextEdit,
         QVBoxLayout,
         QWidget,
@@ -32,6 +33,9 @@ try:
     ECHO_PASSWORD = QLineEdit.EchoMode.Password
     MSG_YES = QMessageBox.StandardButton.Yes
     MSG_NO = QMessageBox.StandardButton.No
+    ADJUST_MIN = QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+    SIZE_EXPANDING = QSizePolicy.Policy.Expanding
+    SIZE_FIXED = QSizePolicy.Policy.Fixed
 except Exception:
     from PyQt5.QtCore import Qt, QThread, QUrl, pyqtSignal
     from PyQt5.QtGui import QDesktopServices, QPixmap
@@ -45,6 +49,7 @@ except Exception:
         QMessageBox,
         QPushButton,
         QScrollArea,
+        QSizePolicy,
         QTextEdit,
         QVBoxLayout,
         QWidget,
@@ -56,6 +61,9 @@ except Exception:
     ECHO_PASSWORD = QLineEdit.Password
     MSG_YES = QMessageBox.Yes
     MSG_NO = QMessageBox.No
+    ADJUST_MIN = QComboBox.AdjustToMinimumContentsLengthWithIcon
+    SIZE_EXPANDING = QSizePolicy.Expanding
+    SIZE_FIXED = QSizePolicy.Fixed
 
 from krita import DockWidget, Krita
 
@@ -91,6 +99,8 @@ from .openai_provider import OpenAIRequestError, edit_image
 from .prompts import EmptyInstructionError, compose_edit_prompt
 from .settings import (
     ALLOWED_QUALITIES,
+    DEFAULT_MODEL,
+    MODEL_CHOICES,
     append_request_log,
     load_settings,
     remember_prompt,
@@ -104,6 +114,12 @@ except ImportError:
         return text
 
 _PREVIEW_WIDTH = 240
+
+
+def _narrow_combo(combo: QComboBox) -> None:
+    combo.setSizeAdjustPolicy(ADJUST_MIN)
+    combo.setMinimumContentsLength(8)
+    combo.setSizePolicy(SIZE_EXPANDING, SIZE_FIXED)
 
 
 class GenerateWorker(QThread):
@@ -224,19 +240,20 @@ class AIArtAssistantDocker(DockWidget):
 
         generate_box = QGroupBox(i18n("AI edit"))
         generate_layout = QVBoxLayout(generate_box)
-        generate_layout.addWidget(
-            QLabel(
-                i18n(
-                    "Generate uploads the visible canvas, or the selected sketch "
-                    "(enlarged if OpenAI needs a bigger image)."
-                )
+        generate_help = QLabel(
+            i18n(
+                "Generate uploads the visible canvas, or the selected sketch "
+                "(enlarged if OpenAI needs a bigger image)."
             )
         )
+        generate_help.setWordWrap(True)
+        generate_layout.addWidget(generate_help)
         generate_layout.addWidget(QLabel(i18n("Instruction")))
         self.history_combo = QComboBox()
         self.history_combo.setToolTip(
             i18n("Recent instructions saved on this PC. Pictures are not stored.")
         )
+        _narrow_combo(self.history_combo)
         self.history_combo.currentIndexChanged.connect(self._reuse_history)
         generate_layout.addWidget(self.history_combo)
         self.prompt_edit = QTextEdit()
@@ -259,6 +276,7 @@ class AIArtAssistantDocker(DockWidget):
         quality_row = QHBoxLayout()
         quality_row.addWidget(QLabel(i18n("Quality")))
         self.quality_combo = QComboBox()
+        _narrow_combo(self.quality_combo)
         for value in ALLOWED_QUALITIES:
             self.quality_combo.addItem(value)
         quality = self._settings.get("quality", "medium")
@@ -266,11 +284,25 @@ class AIArtAssistantDocker(DockWidget):
         self.quality_combo.setCurrentIndex(index)
         quality_row.addWidget(self.quality_combo)
         generate_layout.addLayout(quality_row)
-        generate_layout.addWidget(
-            QLabel(i18n("Model: gpt-image-2.5-flare (one image per Generate click)"))
-        )
 
-        generate_row = QHBoxLayout()
+        model_row = QHBoxLayout()
+        model_row.addWidget(QLabel(i18n("Model")))
+        self.model_combo = QComboBox()
+        _narrow_combo(self.model_combo)
+        self.model_combo.setToolTip(
+            i18n(
+                "Flare is faster. Sunburst is more precise and usually costs more. "
+                "One image per Generate click. This is the Image Edit API, not ChatGPT."
+            )
+        )
+        for model_id, label in MODEL_CHOICES:
+            self.model_combo.addItem(i18n(label), model_id)
+        saved_model = self._settings.get("model", DEFAULT_MODEL)
+        model_index = self.model_combo.findData(saved_model)
+        self.model_combo.setCurrentIndex(model_index if model_index >= 0 else 0)
+        model_row.addWidget(self.model_combo)
+        generate_layout.addLayout(model_row)
+
         self.generate_button = QPushButton(i18n("Generate"))
         self.generate_button.clicked.connect(self._generate)
         self.cancel_button = QPushButton(i18n("Cancel"))
@@ -282,11 +314,9 @@ class AIArtAssistantDocker(DockWidget):
         )
         self.cancel_button.clicked.connect(self._cancel_generate)
         self.cancel_button.setEnabled(False)
-        generate_row.addWidget(self.generate_button)
-        generate_row.addWidget(self.cancel_button)
-        generate_layout.addLayout(generate_row)
+        generate_layout.addWidget(self.generate_button)
+        generate_layout.addWidget(self.cancel_button)
 
-        candidate_row = QHBoxLayout()
         self.apply_button = QPushButton(i18n("Apply as new layer"))
         self.apply_button.clicked.connect(self._apply_candidate)
         self.discard_button = QPushButton(i18n("Discard"))
@@ -294,10 +324,9 @@ class AIArtAssistantDocker(DockWidget):
         self.retry_button = QPushButton(i18n("Retry"))
         self.retry_button.setToolTip(i18n("Sends another paid request."))
         self.retry_button.clicked.connect(self._generate)
-        candidate_row.addWidget(self.apply_button)
-        candidate_row.addWidget(self.discard_button)
-        candidate_row.addWidget(self.retry_button)
-        generate_layout.addLayout(candidate_row)
+        generate_layout.addWidget(self.apply_button)
+        generate_layout.addWidget(self.discard_button)
+        generate_layout.addWidget(self.retry_button)
         layout.addWidget(generate_box)
 
         self.preview_label = QLabel(i18n("No preview yet."))
@@ -308,7 +337,9 @@ class AIArtAssistantDocker(DockWidget):
 
         settings_box = QGroupBox(i18n("Settings"))
         settings_layout = QVBoxLayout(settings_box)
-        settings_layout.addWidget(QLabel(i18n("OpenAI API key (not ChatGPT Plus)")))
+        key_help = QLabel(i18n("OpenAI API key (not ChatGPT Plus)"))
+        key_help.setWordWrap(True)
+        settings_layout.addWidget(key_help)
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setEchoMode(ECHO_PASSWORD)
         self.api_key_edit.setPlaceholderText(i18n("sk-..."))
@@ -316,18 +347,16 @@ class AIArtAssistantDocker(DockWidget):
         self.key_status_label = QLabel()
         self.key_status_label.setWordWrap(True)
         settings_layout.addWidget(self.key_status_label)
-        key_row = QHBoxLayout()
         save_key_button = QPushButton(i18n("Save on this PC"))
         save_key_button.clicked.connect(self._save_key_persistent)
         session_key_button = QPushButton(i18n("This session only"))
         session_key_button.clicked.connect(self._save_key_session)
         clear_key_button = QPushButton(i18n("Clear key"))
         clear_key_button.clicked.connect(self._clear_key)
-        key_row.addWidget(save_key_button)
-        key_row.addWidget(session_key_button)
-        key_row.addWidget(clear_key_button)
-        settings_layout.addLayout(key_row)
-        save_prefs_button = QPushButton(i18n("Save prompt and quality"))
+        settings_layout.addWidget(save_key_button)
+        settings_layout.addWidget(session_key_button)
+        settings_layout.addWidget(clear_key_button)
+        save_prefs_button = QPushButton(i18n("Save prompt, model, and quality"))
         save_prefs_button.clicked.connect(self._save_prefs)
         settings_layout.addWidget(save_prefs_button)
         layout.addWidget(settings_box)
@@ -547,7 +576,7 @@ class AIArtAssistantDocker(DockWidget):
                 image_path=str(image_path),
                 mask_path=mask_path,
                 prompt=prompt,
-                model=self._settings.get("model", "gpt-image-2.5-flare"),
+                model=self._current_model(),
                 quality=self._job_quality,
                 size=size,
                 width=upload_w,
@@ -868,12 +897,19 @@ class AIArtAssistantDocker(DockWidget):
 
     def _save_prefs(self):
         self._persist_prefs_quietly()
-        self._set_status(i18n("Prompt and quality saved on this PC (not the API key)."))
+        self._set_status(i18n("Prompt, model, and quality saved on this PC (not the API key)."))
 
     def _persist_prefs_quietly(self):
         self._settings["base_prompt"] = self.base_prompt_edit.toPlainText()
         self._settings["quality"] = self.quality_combo.currentText() or "medium"
+        self._settings["model"] = self._current_model()
         save_settings(self._settings)
+
+    def _current_model(self) -> str:
+        value = self.model_combo.currentData()
+        if value in (choice[0] for choice in MODEL_CHOICES):
+            return str(value)
+        return DEFAULT_MODEL
 
     def _refresh_history_combo(self):
         self.history_combo.blockSignals(True)

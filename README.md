@@ -28,7 +28,7 @@ Generate uploads the visible canvas, or the **selected sketch**, to OpenAI. That
 - Krita docker named **AI Art Assistant**
 - Document name/size and selection status
 - Export visible canvas / selection stencil; import PNG as a new layer
-- OpenAI Image Edit (`gpt-image-2.5-flare`): one image per Generate click
+- OpenAI Image Edit: **flare** (default, faster) or **sunburst** (more precise, usually more credits). One image per Generate click. This is the Image API, not ChatGPT.
 - API key in Windows Credential Manager (session-only fallback)
 - Candidate preview, then Apply as new layer / Discard / Retry
 - Local selection clip: preview and Apply use the box from Generate time (feathered edges stay soft)
@@ -74,9 +74,10 @@ Paste an OpenAI **API** key in the panel Settings (Windows Credential Manager). 
 
 ### What you should see
 
-- A side panel titled **AI Art Assistant**
+- A side panel titled **AI Art Assistant** (fits a narrow docker; text wraps)
 - With a drawing open: the file name and size, for example `1024 × 1536`
 - Generate enabled after a key is saved and a drawing is open
+- Model: flare (faster) or sunburst (more precise)
 - Apply / Discard / Retry after a candidate returns
 - With a selection: Generate uploads that sketch (enlarged if needed); preview shows only the selection; Apply puts a transparent overlay on top
 - Original layers still there after Apply; Undo removes the new layer

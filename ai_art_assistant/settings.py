@@ -10,9 +10,13 @@ from pathlib import Path
 
 from .prompts import DEFAULT_BASE_PROMPT
 
-ALLOWED_MODELS = ("gpt-image-2.5-flare",)
+ALLOWED_MODELS = ("gpt-image-2.5-flare", "gpt-image-2.5-sunburst")
 ALLOWED_QUALITIES = ("low", "medium", "high")
 DEFAULT_MODEL = "gpt-image-2.5-flare"
+MODEL_CHOICES = (
+    ("gpt-image-2.5-flare", "flare (faster)"),
+    ("gpt-image-2.5-sunburst", "sunburst (more precise)"),
+)
 DEFAULT_QUALITY = "medium"
 DEFAULT_GENERATE_WARN_AFTER = 5
 PROMPT_HISTORY_LIMIT = 8
