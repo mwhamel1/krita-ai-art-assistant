@@ -218,3 +218,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Krita documents and local plugin clutter
+*.kra
+*.kra~
+*.png~
