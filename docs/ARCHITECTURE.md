@@ -10,24 +10,25 @@ visible canvas capture
 selection stencil (optional)
         |
         v
-local composite (keep unselected pixels unchanged)
+local composite (keep unselected pixels unchanged)  [not in this version]
         |
         v
 new Krita paint layer (undoable)
 ```
 
-The cloud model is guidance only. The plugin is responsible for not applying pixels outside the selection.
+The cloud model is guidance only. The plugin is responsible for not applying pixels outside the selection (later version). Phase 1 imports the PNG as a full overlay layer.
 
 ## Modules (current and planned)
 
 | Piece | Role | Status |
 |---|---|---|
 | Plugin bootstrap (`__init__.py`, `.desktop`) | Register the docker with Krita | Phase 0 |
-| Panel (`docker.py`) | Show document info and user actions | Phase 0 (read-only) |
-| Krita document adapter | Projection, selection, layer insert | Phase 1 |
-| Image pipeline | PNG, mask alpha, compositing | Phase 1–3 |
+| Panel (`docker.py`) | Document info, export, import, preview | Phase 1 |
+| Krita document adapter (`krita_document.py`) | Projection, selection, layer insert | Phase 1 |
+| Image pipeline (`image_pipeline.py`) | PNG size checks, coverage stencil | Phase 1 |
 | OpenAI adapter | Image Edit HTTPS calls | Phase 2 |
 | Job coordinator | One paid request per click, ignore stale results | Phase 2–3 |
+| Strict selection composite | Clip applied pixels to the stencil | Phase 3 |
 
 ## Development install
 

@@ -21,19 +21,20 @@ sketch in Krita -> panel -> visible picture + selection stencil
 
 ## Implemented / Not yet
 
-**Implemented (Phase 0)**
+**Implemented (Phase 1)**
 
 - Krita docker named **AI Art Assistant**
-- Shows the open document name and pixel size
-- Shows whether a selection exists (and its bounds)
-- Refresh button, plus updates when you switch documents
+- Shows the open document name, pixel size, and whether a selection exists
+- Export the visible canvas to a PNG (hidden layers stay out)
+- Export the current selection as a same-size stencil PNG
+- Import a PNG as a new undoable layer (originals kept; size must match)
+- Preview and **Show exported files**
+- Automatic tests for size and stencil coverage (`py -3.14 -m unittest tests.test_image_pipeline`)
 
 **Not yet**
 
-- Export the visible canvas to a PNG
-- Export the selection stencil
-- Import a PNG as a new layer
 - OpenAI Image Edit / Generate
+- Clipping an imported result to the selection (that is a later step)
 - Walkthrough video and docker screenshot
 
 The Generate button is visible and disabled on purpose so the panel is honest.
@@ -55,23 +56,32 @@ powershell -ExecutionPolicy Bypass -File .\scripts\link_plugin_for_dev.ps1
 
 3. Open Krita.
 4. **Settings → Configure Krita → Python Plugin Manager**
-5. Check **AI Art Assistant**. If you see an error next to it, the plugin failed to load (see troubleshooting).
+5. Check **AI Art Assistant**. If there is an error next to it, the plugin failed to load (see troubleshooting).
 6. Click OK, then **close and reopen Krita**.
-7. **Settings → Dockers → AI Art Assistant** if the panel is not visible.
+7. You should be on the Start screen. **Do not** open **Settings → Dockers** yet; those names stay grey until a drawing exists.
+8. Click **New Image** (or **File → New**), then Create.
+9. **Settings → Dockers → AI Art Assistant** and check it so the side panel appears.
+
+After any code change, fully restart Krita. Plugins do not live-reload.
 
 ### What you should see
 
 - A side panel titled **AI Art Assistant**
-- With no drawing open: `Document: No document open.`
 - With a drawing open: the file name and size, for example `1024 × 1536`
 - After you make a selection: `Selection: Yes` and a size
-- Export / Import / Generate buttons greyed out
+- **Export visible picture** and **Import as new layer** clickable
+- **Export selection stencil** clickable only when a selection exists
+- **Generate (not built yet)** greyed out
+
+Exported PNGs go to `%LOCALAPPDATA%\krita-ai-art-assistant\exports\`. Use **Show exported files** to open that folder. Do not put those files, `.kra` files, or game art into git.
 
 ## Troubleshooting
 
 - The plugin is unchecked after restart: it crashed while loading. In Krita open **Help → Show Krita Log for Bug Reports** and look for `ai_art_assistant`.
+- The panel name is grey in Dockers on the Start screen: create or open an image first, then try Dockers again.
 - The panel name is missing from Dockers: the Python Plugin Manager checkbox is off, or Krita was not restarted after enabling it.
 - Document labels stay empty: click **Refresh**, or click the drawing once so it is the active document.
+- Import says the size does not match: the PNG must be the same pixel size as the canvas. The plugin will not stretch or crop.
 
 ## Architecture
 
