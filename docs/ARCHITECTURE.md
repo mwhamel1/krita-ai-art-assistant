@@ -13,27 +13,30 @@ selection stencil (optional, inverted for OpenAI)
 HTTPS POST /v1/images/edits  (one click, one image)
         |
         v
-candidate preview
+clip to Generate-time stencil (if any): AI RGB, alpha = coverage
+        |
+        v
+candidate preview (transparent outside the box)
         |
         v
 new Krita paint layer if you Apply (undoable)
 ```
 
-The OpenAI mask is guidance. This version does not yet clip applied pixels to the selection.
+The OpenAI mask is still a hint to the model. Local clip is what keeps unselected pixels off the new layer. No selection means the full image is previewed and applied, same as before.
 
 ## Modules
 
 | Piece | Role | Status |
 |---|---|---|
 | Plugin bootstrap (`__init__.py`, `.desktop`) | Register the docker with Krita | Phase 0 |
-| Panel (`docker.py`) | Document info, export, import, Generate, preview | Phase 2 |
-| Krita document adapter (`krita_document.py`) | Projection, selection, layer insert | Phase 1 |
-| Image pipeline (`image_pipeline.py`) | PNG size checks, coverage, OpenAI mask invert | Phase 2 |
+| Panel (`docker.py`) | Document info, export, import, Generate, Cancel, preview | Phase 3 |
+| Krita document adapter (`krita_document.py`) | Projection, selection, layer insert, overlay clip | Phase 3 |
+| Image pipeline (`image_pipeline.py`) | PNG size checks, coverage, OpenAI mask invert, clip | Phase 3 |
 | Prompts (`prompts.py`) | Base prompt + rules + instruction | Phase 2 |
 | Credentials (`credentials.py`) | Windows Credential Manager / session key | Phase 2 |
-| Settings (`settings.py`) | Non-secret defaults in AppData JSON | Phase 2 |
+| Settings (`settings.py`) | Non-secret defaults, prompt history, request log | Phase 3 |
 | OpenAI adapter (`openai_provider.py`) | Stdlib HTTPS Image Edit | Phase 2 |
-| Strict selection composite | Clip applied pixels to the stencil | Phase 3 |
+| Strict selection composite | Clip applied pixels to the Generate-time stencil | Phase 3 |
 
 ## Development install
 

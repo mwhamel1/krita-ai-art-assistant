@@ -10,7 +10,7 @@ This is a public-source production tool, not a commercial product. Recruiters do
 
 1. Capture the **visible canvas** (what Krita is showing, not a screenshot and not only one layer).
 2. Capture the current **selection** as a full-size stencil when you are editing part of the image.
-3. **Composite** so applied pixels stay inside that selection, even if the model changes more than it should (later version).
+3. **Composite** so applied pixels stay inside that selection, even if the model changes more than it should. The clip is local: RGB from the AI image, alpha from the selection at Generate time.
 4. Insert the result as a **new undoable layer**.
 
 ```
@@ -19,11 +19,11 @@ sketch in Krita -> panel -> visible picture + selection stencil
                  -> preview, then new layer if you apply
 ```
 
-Generate uploads the visible canvas (and mask, if any) to OpenAI. That uses **API credits**, not a ChatGPT Plus subscription.
+Generate uploads the visible canvas (and mask, if any) to OpenAI. That uses **API credits**, not a ChatGPT Plus subscription. A selection is still a **hint** to the model; the plugin then clips the preview and Apply overlay so pixels outside that box never land on a new layer.
 
 ## Implemented / Not yet
 
-**Implemented (Phase 2)**
+**Implemented (Phase 3)**
 
 - Krita docker named **AI Art Assistant**
 - Document name/size and selection status
@@ -31,12 +31,18 @@ Generate uploads the visible canvas (and mask, if any) to OpenAI. That uses **AP
 - OpenAI Image Edit (`gpt-image-2.5-flare`): one image per Generate click
 - API key in Windows Credential Manager (session-only fallback)
 - Candidate preview, then Apply as new layer / Discard / Retry
-- Automatic tests for size, stencil coverage, mask inversion, and fake HTTP (no paid calls)
+- Local selection clip: preview and Apply use the box from Generate time (feathered edges stay soft)
+- Cancel while waiting: the result is ignored (the click may still have been billed)
+- Last few instructions you can reuse (saved in AppData, no pictures)
+- Request log in AppData (date, document, quality, whole-canvas vs selection, ok/error). No dollar amounts
+- Warn after 5 Generates this session before sending another
+- Automatic tests for size, stencil coverage, mask inversion, clip, and fake HTTP (no paid calls)
 
 **Not yet**
 
-- Clipping the AI result to the selection (the mask is guidance only for now)
-- Spend caps / request ledger
+- Cropping the upload to the selection (the whole canvas is still sent)
+- Extra providers or multi-turn chat
+- A real dollar spend cap (the log records outcome, not a price we cannot prove)
 - Walkthrough video and docker screenshot
 
 ## Install (Windows, Krita 5.3.4.1)
@@ -72,7 +78,9 @@ Paste an OpenAI **API** key in the panel Settings (Windows Credential Manager). 
 - With a drawing open: the file name and size, for example `1024 × 1536`
 - Generate enabled after a key is saved and a drawing is open
 - Apply / Discard / Retry after a candidate returns
+- With a selection: preview shows only that region; Apply puts a transparent overlay on top
 - Original layers still there after Apply; Undo removes the new layer
+- Cancel while Generate is running; a confirmation after five Generates this session
 
 Exported PNGs go to `%LOCALAPPDATA%\krita-ai-art-assistant\exports\`. Do not put those files, `.kra` files, API keys, or game art into git.
 

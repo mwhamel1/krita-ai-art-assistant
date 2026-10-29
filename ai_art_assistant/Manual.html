@@ -14,9 +14,9 @@ to OpenAI Image Edit and can apply the result as a new layer.
 <h3>This version</h3>
 <p>
 Export/import work locally. Generate uses gpt-image-2.5-flare, one image
-per click. A selection mask is guidance only; clipping to the selection
-is not built yet. API keys go in Windows Credential Manager, not in the
-Krita file.
+per click. A selection is a hint to the model; the plugin then clips the
+preview and new layer to that selection. Cancel ignores the result.
+API keys go in Windows Credential Manager, not in the Krita file.
 </p>
 <h3>Usage</h3>
 <ol>
@@ -25,7 +25,7 @@ Krita file.
 <li>Create or open an image (Dockers stay grey on the Start screen).</li>
 <li>Show the panel from Settings, Dockers, AI Art Assistant.</li>
 <li>Save an OpenAI API key in Settings (API credits, not ChatGPT Plus).</li>
-<li>Type an instruction and press Generate. Apply, Discard, or Retry the candidate.</li>
+<li>Type an instruction and press Generate. Apply, Discard, Retry, or Cancel.</li>
 </ol>
 </body>
 </html>
