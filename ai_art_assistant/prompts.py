@@ -30,9 +30,9 @@ def compose_edit_prompt(
     base = (base_prompt or "").strip() or DEFAULT_BASE_PROMPT
     if has_selection:
         scope = (
-            "A mask is supplied. Treat transparent mask pixels as the region to edit. "
-            "Leave opaque/unmasked areas unchanged as much as possible. "
-            "The mask is guidance, not a hard crop."
+            "This image is the artist's selected sketch. Edit the entire image. "
+            "Keep the existing pose, silhouette, proportions, and placement. "
+            "Do not invent a new character, camera angle, or layout."
         )
     else:
         scope = "Edit the entire image. Keep the existing composition."

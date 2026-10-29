@@ -29,9 +29,11 @@ class ComposeEditPromptTests(unittest.TestCase):
         self.assertIn("Artist instruction: Turn the armor into leather.", text)
         self.assertIn("entire image", text)
 
-    def test_selection_mentions_mask(self):
+    def test_selection_treats_crop_as_the_whole_sketch(self):
         text = compose_edit_prompt("base", "fix the sword", True)
-        self.assertIn("mask", text.lower())
+        self.assertNotIn("mask", text.lower())
+        self.assertIn("selected sketch", text.lower())
+        self.assertIn("silhouette", text.lower())
         self.assertIn("Artist instruction: fix the sword", text)
 
 

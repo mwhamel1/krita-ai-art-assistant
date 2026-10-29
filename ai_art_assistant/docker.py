@@ -64,10 +64,12 @@ from .image_pipeline import (
     CoverageError,
     DimensionError,
     api_size_string,
+    api_upload_size,
     export_directory,
     new_export_path,
     png_dimensions,
     require_same_size,
+    selection_crop_rect,
 )
 from .krita_document import (
     ExportError,
@@ -75,13 +77,15 @@ from .krita_document import (
     NoDocumentError,
     NoSelectionError,
     clip_candidate_png_to_stencil,
+    crop_png_to_rect,
     default_edit_layer_name,
     default_import_layer_name,
     document_identity,
-    export_openai_mask_png,
     export_selection_stencil_png,
     export_visible_png,
     import_png_as_paint_layer,
+    paste_crop_png,
+    scale_png,
 )
 from .openai_provider import OpenAIRequestError, edit_image
 from .prompts import EmptyInstructionError, compose_edit_prompt
@@ -170,6 +174,7 @@ class AIArtAssistantDocker(DockWidget):
         self._job_document_name = ""
         self._job_width = 0
         self._job_height = 0
+        self._job_crop = None
         self._job_running = False
         self._cancel_requested = False
         self._session_generates = 0
@@ -220,7 +225,12 @@ class AIArtAssistantDocker(DockWidget):
         generate_box = QGroupBox(i18n("AI edit"))
         generate_layout = QVBoxLayout(generate_box)
         generate_layout.addWidget(
-            QLabel(i18n("Generate uploads the visible canvas (and mask) to OpenAI."))
+            QLabel(
+                i18n(
+                    "Generate uploads the visible canvas, or the selected sketch "
+                    "(enlarged if OpenAI needs a bigger image)."
+                )
+            )
         )
         generate_layout.addWidget(QLabel(i18n("Instruction")))
         self.history_combo = QComboBox()
@@ -389,8 +399,9 @@ class AIArtAssistantDocker(DockWidget):
             if not self._job_running and not self._candidate_path:
                 self._set_status(
                     i18n(
-                        "Generate sends the visible canvas to OpenAI (one paid request). "
-                        "If you have a selection, preview and Apply clip to that box locally."
+                        "Generate sends the visible canvas, or the selected sketch, "
+                        "to OpenAI (one paid request). A small selection is enlarged "
+                        "so the doodle fills the upload, then clipped back to the box."
                     )
                 )
         except Exception as exc:
@@ -453,7 +464,21 @@ class AIArtAssistantDocker(DockWidget):
                 self.prompt_edit.toPlainText(),
                 has_selection,
             )
-            size = api_size_string(document.width(), document.height())
+            upload_w = document.width()
+            upload_h = document.height()
+            crop_rect = None
+            if has_selection:
+                selection = document.selection()
+                crop_rect = selection_crop_rect(
+                    selection.x(),
+                    selection.y(),
+                    selection.width(),
+                    selection.height(),
+                    document.width(),
+                    document.height(),
+                )
+                upload_w, upload_h = api_upload_size(crop_rect[2], crop_rect[3])
+            size = api_size_string(upload_w, upload_h)
             if not self._confirm_session_spend():
                 self._set_status(i18n("Generate cancelled. Nothing was sent."))
                 return
@@ -461,14 +486,29 @@ class AIArtAssistantDocker(DockWidget):
             export_visible_png(document, image_path)
             mask_path = ""
             self._job_stencil_path = ""
+            self._job_crop = crop_rect
             self._job_scope = "selection" if has_selection else "whole-canvas"
             if has_selection:
                 stencil_file = new_export_path("stencil")
                 export_selection_stencil_png(document, stencil_file)
                 self._job_stencil_path = str(stencil_file)
-                mask_file = new_export_path("openai-mask")
-                export_openai_mask_png(document, mask_file)
-                mask_path = str(mask_file)
+                crop_x, crop_y, crop_w, crop_h = crop_rect
+                image_path = crop_png_to_rect(
+                    image_path,
+                    new_export_path("visible-crop"),
+                    crop_x,
+                    crop_y,
+                    crop_w,
+                    crop_h,
+                )
+                if (upload_w, upload_h) != (crop_w, crop_h):
+                    image_path = scale_png(
+                        image_path,
+                        new_export_path("visible-upload"),
+                        upload_w,
+                        upload_h,
+                        nearest=True,
+                    )
             instruction = self.prompt_edit.toPlainText()
             self._settings["prompt_history"] = remember_prompt(
                 self._settings.get("prompt_history") or [], instruction
@@ -485,13 +525,23 @@ class AIArtAssistantDocker(DockWidget):
             self._candidate_path = ""
             self._set_candidate_buttons(False)
             self._update_generate_enabled(True)
-            self._set_status(
-                i18n(
-                    "Uploading the visible canvas to OpenAI. This spends API credits. "
-                    "One click is one image. Krita should stay usable. Cancel ignores "
-                    "the result; it does not stop a request that already started."
+            if has_selection:
+                self._set_status(
+                    i18n(
+                        "Uploading the selected sketch to OpenAI. "
+                        "If the box is small, the doodle is enlarged so it fills the "
+                        "request, then scaled back. This spends API credits. "
+                        "Cancel ignores the result; it does not stop a request that already started."
+                    )
                 )
-            )
+            else:
+                self._set_status(
+                    i18n(
+                        "Uploading the visible canvas to OpenAI. This spends API credits. "
+                        "One click is one image. Krita should stay usable. Cancel ignores "
+                        "the result; it does not stop a request that already started."
+                    )
+                )
             worker = GenerateWorker(
                 api_key=api_key,
                 image_path=str(image_path),
@@ -500,8 +550,8 @@ class AIArtAssistantDocker(DockWidget):
                 model=self._settings.get("model", "gpt-image-2.5-flare"),
                 quality=self._job_quality,
                 size=size,
-                width=document.width(),
-                height=document.height(),
+                width=upload_w,
+                height=upload_h,
             )
             worker.succeeded.connect(self._on_generate_ok)
             worker.failed.connect(self._on_generate_error)
@@ -514,6 +564,7 @@ class AIArtAssistantDocker(DockWidget):
             NoDocumentError,
             NoSelectionError,
             ExportError,
+            LayerImportError,
             CoverageError,
         ) as exc:
             self._job_running = False
@@ -545,35 +596,56 @@ class AIArtAssistantDocker(DockWidget):
             )
             return
         apply_path = path
-        if self._job_stencil_path:
-            try:
+        try:
+            if self._job_crop is not None:
+                crop_x, crop_y, crop_w, crop_h = self._job_crop
+                crop_result = path
+                got_w, got_h = png_dimensions(path)
+                if (got_w, got_h) != (crop_w, crop_h):
+                    scaled_back = new_export_path("scaled-back")
+                    scale_png(path, scaled_back, crop_w, crop_h, nearest=False)
+                    crop_result = str(scaled_back)
+                pasted = new_export_path("pasted")
+                paste_crop_png(
+                    crop_result,
+                    pasted,
+                    crop_x,
+                    crop_y,
+                    crop_w,
+                    crop_h,
+                    self._job_width,
+                    self._job_height,
+                )
+                apply_path = str(pasted)
+            if self._job_stencil_path:
                 overlay = new_export_path("overlay")
                 clip_candidate_png_to_stencil(
-                    path,
+                    apply_path,
                     self._job_stencil_path,
                     overlay,
                     self._job_width,
                     self._job_height,
                 )
                 apply_path = str(overlay)
-            except Exception as exc:
-                self._candidate_path = ""
-                self._set_candidate_buttons(False)
-                self._log_request("error")
-                self._set_status(
-                    i18n(
-                        "The AI image returned, but clipping to the selection failed: {error}"
-                    ).format(error=exc)
-                )
-                return
+        except Exception as exc:
+            self._candidate_path = ""
+            self._set_candidate_buttons(False)
+            self._log_request("error")
+            self._set_status(
+                i18n(
+                    "The AI image returned, but placing it on the canvas failed: {error}"
+                ).format(error=exc)
+            )
+            return
         self._candidate_path = apply_path
         self._show_preview(Path(apply_path))
         self._set_candidate_buttons(True)
         extra = ""
         if self._job_stencil_path:
             extra = i18n(
-                " Preview and Apply are clipped to the selection from the moment "
-                "you pressed Generate. Outside that box the new layer stays empty."
+                " The upload was the selected sketch (enlarged if needed). "
+                "Preview and Apply are clipped to the selection from Generate. "
+                "Outside that box the new layer stays empty."
             )
         self._log_request("ok")
         self._set_status(
