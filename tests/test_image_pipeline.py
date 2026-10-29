@@ -14,6 +14,7 @@ from ai_art_assistant.image_pipeline import (
     CoverageError,
     DimensionError,
     api_size_string,
+    clip_candidate_rgba_to_coverage,
     export_directory,
     openai_mask_rgba_from_coverage,
     png_dimensions,
@@ -72,6 +73,38 @@ class CoverageTests(unittest.TestCase):
     def test_full_selection_is_fully_transparent_for_openai(self):
         rgba = openai_mask_rgba_from_coverage(bytes([255, 255, 255, 255]), 2, 2)
         self.assertEqual(list(rgba[3::4]), [0, 0, 0, 0])
+
+    def test_clip_keeps_ai_rgb_and_uses_coverage_as_alpha(self):
+        candidate = bytes(
+            [
+                10, 20, 30, 255,
+                40, 50, 60, 255,
+                70, 80, 90, 128,
+                100, 110, 120, 0,
+            ]
+        )
+        coverage = bytes([0, 64, 255, 128])
+        clipped = clip_candidate_rgba_to_coverage(candidate, coverage, 2, 2)
+        self.assertEqual(clipped[0:3], b"\x0a\x14\x1e")
+        self.assertEqual(clipped[3], 0)
+        self.assertEqual(clipped[4:8], bytes([40, 50, 60, 64]))
+        self.assertEqual(clipped[8:12], bytes([70, 80, 90, 255]))
+        self.assertEqual(clipped[12:16], bytes([100, 110, 120, 128]))
+
+    def test_clip_outside_box_is_fully_transparent(self):
+        candidate = bytes([255, 0, 0, 255] * 4)
+        coverage = bytes([0, 0, 0, 255])
+        clipped = clip_candidate_rgba_to_coverage(candidate, coverage, 2, 2)
+        self.assertEqual(list(clipped[3::4]), [0, 0, 0, 255])
+        self.assertEqual(clipped[12:15], b"\xff\x00\x00")
+
+    def test_clip_wrong_coverage_length_is_an_error(self):
+        with self.assertRaises(CoverageError):
+            clip_candidate_rgba_to_coverage(bytes(16), b"\x00", 2, 2)
+
+    def test_clip_wrong_candidate_length_is_an_error(self):
+        with self.assertRaises(DimensionError):
+            clip_candidate_rgba_to_coverage(bytes(8), bytes([255, 255, 255, 255]), 2, 2)
 
 
 class PngTests(unittest.TestCase):

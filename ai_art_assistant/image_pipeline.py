@@ -66,6 +66,33 @@ def stencil_rgba_from_coverage(coverage: bytes, width: int, height: int) -> byte
     return bytes(out)
 
 
+def clip_candidate_rgba_to_coverage(
+    candidate_rgba: bytes,
+    coverage: bytes,
+    width: int,
+    height: int,
+) -> bytes:
+    """RGB from the AI image; alpha from the Generate-time selection coverage.
+
+    Unselected pixels become fully transparent. Feathered coverage stays soft.
+    """
+    require_coverage_size(coverage, width, height)
+    expected = width * height * 4
+    if len(candidate_rgba) != expected:
+        raise DimensionError(
+            f"AI image has {len(candidate_rgba)} bytes; expected {expected} "
+            f"for {width}×{height}."
+        )
+    out = bytearray(expected)
+    for index, value in enumerate(coverage):
+        offset = index * 4
+        out[offset] = candidate_rgba[offset]
+        out[offset + 1] = candidate_rgba[offset + 1]
+        out[offset + 2] = candidate_rgba[offset + 2]
+        out[offset + 3] = value
+    return bytes(out)
+
+
 def openai_mask_rgba_from_coverage(coverage: bytes, width: int, height: int) -> bytes:
     """OpenAI Image Edit: alpha 0 means 'edit this pixel'. Invert Krita coverage."""
     require_coverage_size(coverage, width, height)
