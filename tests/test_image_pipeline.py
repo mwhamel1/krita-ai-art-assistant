@@ -14,12 +14,15 @@ from ai_art_assistant.image_pipeline import (
     CoverageError,
     DimensionError,
     api_size_string,
+    api_upload_size,
     clip_candidate_rgba_to_coverage,
     export_directory,
     openai_mask_rgba_from_coverage,
+    paste_crop_rgba,
     png_dimensions,
     require_coverage_size,
     require_same_size,
+    selection_crop_rect,
     stencil_rgba_from_coverage,
     write_png_gray,
     write_png_rgba,
@@ -121,6 +124,92 @@ class PngTests(unittest.TestCase):
             path = Path(folder) / "gray.png"
             write_png_gray(path, gray, 2, 2)
             self.assertEqual(png_dimensions(path), (2, 2))
+
+
+class SelectionCropRectTests(unittest.TestCase):
+    def test_margin_is_applied_and_selection_stays_inside(self):
+        x, y, width, height = selection_crop_rect(200, 400, 160, 160, 1024, 1536, margin=64)
+        self.assertLessEqual(x, 200)
+        self.assertLessEqual(y, 400)
+        self.assertGreaterEqual(x + width, 360)
+        self.assertGreaterEqual(y + height, 560)
+        self.assertEqual(width % 16, 0)
+        self.assertEqual(height % 16, 0)
+        self.assertLess(width * height, 655_360)
+
+    def test_corner_selection_clamps_to_document(self):
+        x, y, width, height = selection_crop_rect(0, 0, 80, 80, 1024, 1536, margin=64)
+        self.assertEqual(x, 0)
+        self.assertEqual(y, 0)
+        self.assertLessEqual(x + width, 1024)
+        self.assertLessEqual(y + height, 1536)
+        self.assertLess(width * height, 655_360)
+
+    def test_tiny_box_stays_tight_and_does_not_pad_the_canvas(self):
+        x, y, width, height = selection_crop_rect(40, 40, 32, 32, 1024, 1536, margin=64)
+        self.assertGreaterEqual(x, 0)
+        self.assertGreaterEqual(y, 0)
+        self.assertLessEqual(x + width, 200)
+        self.assertLessEqual(y + height, 200)
+        self.assertLess(width * height, 655_360)
+
+    def test_tiny_document_still_yields_a_crop(self):
+        x, y, width, height = selection_crop_rect(0, 0, 64, 64, 512, 512, margin=64)
+        self.assertEqual(x, 0)
+        self.assertEqual(y, 0)
+        self.assertLessEqual(width, 512)
+        self.assertLessEqual(height, 512)
+
+    def test_non_multiple_of_16_is_snapped(self):
+        x, y, width, height = selection_crop_rect(10, 20, 100, 100, 1024, 1536, margin=64)
+        self.assertEqual(width % 16, 0)
+        self.assertEqual(height % 16, 0)
+        self.assertLessEqual(x, 10)
+        self.assertLessEqual(y, 20)
+        self.assertGreaterEqual(x + width, 110)
+        self.assertGreaterEqual(y + height, 120)
+
+
+class PasteCropTests(unittest.TestCase):
+    def test_paste_keeps_alignment_and_transparent_outside(self):
+        crop = bytes(
+            [
+                1, 2, 3, 255,
+                4, 5, 6, 255,
+                7, 8, 9, 128,
+                10, 11, 12, 64,
+            ]
+        )
+        full = paste_crop_rgba(crop, 1, 1, 2, 2, 4, 4)
+        self.assertEqual(len(full), 4 * 4 * 4)
+        self.assertEqual(full[0:4], b"\x00\x00\x00\x00")
+        dest = ((1 * 4) + 1) * 4
+        self.assertEqual(full[dest : dest + 4], bytes([1, 2, 3, 255]))
+        dest2 = ((2 * 4) + 2) * 4
+        self.assertEqual(full[dest2 : dest2 + 4], bytes([10, 11, 12, 64]))
+
+    def test_paste_that_does_not_fit_is_an_error(self):
+        with self.assertRaises(DimensionError) as caught:
+            paste_crop_rgba(bytes(2 * 2 * 4), 3, 3, 2, 2, 4, 4)
+        self.assertIn("will not stretch", str(caught.exception))
+
+
+class ApiUploadSizeTests(unittest.TestCase):
+    def test_card_size_is_unchanged(self):
+        self.assertEqual(api_upload_size(1024, 1536), (1024, 1536))
+
+    def test_tiny_square_is_enlarged_to_a_valid_filled_size(self):
+        width, height = api_upload_size(160, 160)
+        self.assertEqual(width, height)
+        self.assertGreaterEqual(width, 160)
+        self.assertEqual(width % 16, 0)
+        api_size_string(width, height)
+
+    def test_integer_scale_keeps_aspect(self):
+        width, height = api_upload_size(288, 288)
+        self.assertEqual(width, height)
+        self.assertEqual(width % 288, 0)
+        api_size_string(width, height)
 
 
 class ApiSizeTests(unittest.TestCase):

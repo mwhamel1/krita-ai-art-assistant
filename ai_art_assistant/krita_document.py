@@ -9,9 +9,19 @@ from datetime import datetime
 from pathlib import Path
 
 try:
+    from PyQt6.QtCore import Qt
     from PyQt6.QtGui import QImage
+
+    IGNORE_ASPECT = Qt.AspectRatioMode.IgnoreAspectRatio
+    FAST_SCALE = Qt.TransformationMode.FastTransformation
+    SMOOTH_SCALE = Qt.TransformationMode.SmoothTransformation
 except Exception:
+    from PyQt5.QtCore import Qt
     from PyQt5.QtGui import QImage
+
+    IGNORE_ASPECT = Qt.IgnoreAspectRatio
+    FAST_SCALE = Qt.FastTransformation
+    SMOOTH_SCALE = Qt.SmoothTransformation
 
 from krita import InfoObject
 
@@ -19,6 +29,7 @@ from .image_pipeline import (
     DimensionError,
     clip_candidate_rgba_to_coverage,
     openai_mask_rgba_from_coverage,
+    paste_crop_rgba,
     png_dimensions,
     require_coverage_size,
     require_same_size,
@@ -238,6 +249,85 @@ def document_identity(document) -> tuple:
                 name = ""
         name = name or "Untitled"
     return (name, document.width(), document.height())
+
+
+def crop_png_to_rect(
+    source_path: str | Path,
+    dest_path: str | Path,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+) -> Path:
+    """Cut a rectangle from a full-size PNG. Does not stretch."""
+    source_path = Path(source_path)
+    dest_path = Path(dest_path)
+    image = QImage(str(source_path))
+    if image.isNull():
+        raise LayerImportError(f"Could not read PNG: {source_path}")
+    if x < 0 or y < 0 or x + width > image.width() or y + height > image.height():
+        raise DimensionError(
+            f"Crop {width}×{height} at ({x}, {y}) does not fit on "
+            f"{image.width()}×{image.height()}. The plugin will not stretch or crop it."
+        )
+    cropped = image.copy(x, y, width, height)
+    if cropped.isNull() or cropped.width() != width or cropped.height() != height:
+        raise LayerImportError(f"Could not crop PNG to {width}×{height}.")
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    if not cropped.save(str(dest_path), "PNG"):
+        raise ExportError(f"Could not save cropped PNG to {dest_path}")
+    got_w, got_h = png_dimensions(dest_path)
+    require_same_size(got_w, got_h, width, height)
+    return dest_path
+
+
+def scale_png(
+    source_path: str | Path,
+    dest_path: str | Path,
+    width: int,
+    height: int,
+    nearest: bool,
+) -> Path:
+    """Scale a PNG to an exact size. Nearest-neighbor keeps sketch lines chunky."""
+    source_path = Path(source_path)
+    dest_path = Path(dest_path)
+    image = QImage(str(source_path))
+    if image.isNull():
+        raise LayerImportError(f"Could not read PNG: {source_path}")
+    mode = FAST_SCALE if nearest else SMOOTH_SCALE
+    scaled = image.scaled(width, height, IGNORE_ASPECT, mode)
+    if scaled.isNull() or scaled.width() != width or scaled.height() != height:
+        raise LayerImportError(f"Could not scale PNG to {width}×{height}.")
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    if not scaled.save(str(dest_path), "PNG"):
+        raise ExportError(f"Could not save scaled PNG to {dest_path}")
+    got_w, got_h = png_dimensions(dest_path)
+    require_same_size(got_w, got_h, width, height)
+    return dest_path
+
+
+def paste_crop_png(
+    crop_path: str | Path,
+    dest_path: str | Path,
+    x: int,
+    y: int,
+    crop_w: int,
+    crop_h: int,
+    doc_w: int,
+    doc_h: int,
+) -> Path:
+    """Paste a crop onto a transparent full-document PNG."""
+    crop_path = Path(crop_path)
+    dest_path = Path(dest_path)
+    crop = QImage(str(crop_path))
+    if crop.isNull():
+        raise LayerImportError(f"Could not read AI crop: {crop_path}")
+    require_same_size(crop.width(), crop.height(), crop_w, crop_h)
+    rgba = _packed_rgba(crop)
+    full = paste_crop_rgba(rgba, x, y, crop_w, crop_h, doc_w, doc_h)
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    write_png_rgba(dest_path, full, doc_w, doc_h)
+    return dest_path
 
 
 def clip_candidate_png_to_stencil(
