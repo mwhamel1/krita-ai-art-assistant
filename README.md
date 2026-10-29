@@ -10,7 +10,7 @@ This is a public-source production tool, not a commercial product. Recruiters do
 
 1. Capture the **visible canvas** (what Krita is showing, not a screenshot and not only one layer).
 2. Capture the current **selection** as a full-size stencil when you are editing part of the image.
-3. **Composite** so applied pixels stay inside that selection, even if the model changes more than it should. The clip is local: RGB from the AI image, alpha from the selection at Generate time.
+3. If there is a selection, **crop the upload** to that sketch plus a small real-pixel margin. If OpenAI needs a bigger image, **enlarge that sketch** so it fills the request (then scale the result back). **Composite** so applied pixels stay inside the selection. The clip is local: RGB from the AI image, alpha from the selection at Generate time.
 4. Insert the result as a **new undoable layer**.
 
 ```
@@ -19,11 +19,11 @@ sketch in Krita -> panel -> visible picture + selection stencil
                  -> preview, then new layer if you apply
 ```
 
-Generate uploads the visible canvas (and mask, if any) to OpenAI. That uses **API credits**, not a ChatGPT Plus subscription. A selection is still a **hint** to the model; the plugin then clips the preview and Apply overlay so pixels outside that box never land on a new layer.
+Generate uploads the visible canvas, or the **selected sketch**, to OpenAI. That uses **API credits**, not a ChatGPT Plus subscription. Selection uploads send **no mask** (a mask means “replace this hole”). The plugin clips preview and Apply so pixels outside the selection never land on a new layer. A tiny box is enlarged so the doodle fills the upload, then scaled back into the box — not padded with the rest of the card.
 
 ## Implemented / Not yet
 
-**Implemented (Phase 3)**
+**Implemented (Phase 4a)**
 
 - Krita docker named **AI Art Assistant**
 - Document name/size and selection status
@@ -32,15 +32,15 @@ Generate uploads the visible canvas (and mask, if any) to OpenAI. That uses **AP
 - API key in Windows Credential Manager (session-only fallback)
 - Candidate preview, then Apply as new layer / Discard / Retry
 - Local selection clip: preview and Apply use the box from Generate time (feathered edges stay soft)
+- Crop-to-selection upload: OpenAI receives the sketch (enlarged if needed, no mask), then the result is scaled back, pasted, and clipped
 - Cancel while waiting: the result is ignored (the click may still have been billed)
 - Last few instructions you can reuse (saved in AppData, no pictures)
 - Request log in AppData (date, document, quality, whole-canvas vs selection, ok/error). No dollar amounts
 - Warn after 5 Generates this session before sending another
-- Automatic tests for size, stencil coverage, mask inversion, clip, and fake HTTP (no paid calls)
+- Automatic tests for size, stencil coverage, mask inversion, clip, crop/paste, and fake HTTP (no paid calls)
 
 **Not yet**
 
-- Cropping the upload to the selection (the whole canvas is still sent)
 - Extra providers or multi-turn chat
 - A real dollar spend cap (the log records outcome, not a price we cannot prove)
 - Walkthrough video and docker screenshot
@@ -78,7 +78,7 @@ Paste an OpenAI **API** key in the panel Settings (Windows Credential Manager). 
 - With a drawing open: the file name and size, for example `1024 × 1536`
 - Generate enabled after a key is saved and a drawing is open
 - Apply / Discard / Retry after a candidate returns
-- With a selection: preview shows only that region; Apply puts a transparent overlay on top
+- With a selection: Generate uploads that sketch (enlarged if needed); preview shows only the selection; Apply puts a transparent overlay on top
 - Original layers still there after Apply; Undo removes the new layer
 - Cancel while Generate is running; a confirmation after five Generates this session
 

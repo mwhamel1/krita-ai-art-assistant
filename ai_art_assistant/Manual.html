@@ -8,14 +8,17 @@
 <h3>AI Art Assistant</h3>
 <p>
 A Krita side panel for artist-controlled, non-destructive image edits.
-The artist keeps the original layers. Generate sends the visible canvas
-to OpenAI Image Edit and can apply the result as a new layer.
+The artist keeps the original layers. Generate sends the visible canvas,
+or the selected sketch, to OpenAI Image Edit and can
+apply the result as a new layer.
 </p>
 <h3>This version</h3>
 <p>
 Export/import work locally. Generate uses gpt-image-2.5-flare, one image
-per click. A selection is a hint to the model; the plugin then clips the
-preview and new layer to that selection. Cancel ignores the result.
+per click. A selection is cropped and sent as a full sketch (enlarged
+if OpenAI needs a bigger image, no mask). The plugin then clips the
+preview and new layer to that selection.
+Cancel ignores the result.
 API keys go in Windows Credential Manager, not in the Krita file.
 </p>
 <h3>Usage</h3>
