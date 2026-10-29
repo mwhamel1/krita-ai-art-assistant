@@ -8,14 +8,15 @@
 <h3>AI Art Assistant</h3>
 <p>
 A Krita side panel for artist-controlled, non-destructive image edits.
-The artist keeps the original layers. Later versions will send the visible
-canvas and an optional selection stencil to a cloud image editor and put the
-result on a new layer.
+The artist keeps the original layers. Generate sends the visible canvas
+to OpenAI Image Edit and can apply the result as a new layer.
 </p>
 <h3>This version</h3>
 <p>
-The panel can export the visible canvas, export a selection stencil, and
-import a PNG as a new layer. Generate / cloud edit is not built yet.
+Export/import work locally. Generate uses gpt-image-2.5-flare, one image
+per click. A selection mask is guidance only; clipping to the selection
+is not built yet. API keys go in Windows Credential Manager, not in the
+Krita file.
 </p>
 <h3>Usage</h3>
 <ol>
@@ -23,7 +24,8 @@ import a PNG as a new layer. Generate / cloud edit is not built yet.
 <li>Restart Krita.</li>
 <li>Create or open an image (Dockers stay grey on the Start screen).</li>
 <li>Show the panel from Settings, Dockers, AI Art Assistant.</li>
-<li>Export visible picture, optionally export a selection stencil, then import a PNG.</li>
+<li>Save an OpenAI API key in Settings (API credits, not ChatGPT Plus).</li>
+<li>Type an instruction and press Generate. Apply, Discard, or Retry the candidate.</li>
 </ol>
 </body>
 </html>

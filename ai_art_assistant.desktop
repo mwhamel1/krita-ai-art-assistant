@@ -5,4 +5,4 @@ X-KDE-Library=ai_art_assistant
 X-Python-2-Compatible=false
 X-Krita-Manual=Manual.html
 Name=AI Art Assistant
-Comment=Non-destructive, selection-aware AI image edits inside Krita (Phase 1: local export/import)
+Comment=Non-destructive, selection-aware AI image edits inside Krita (OpenAI Image Edit)

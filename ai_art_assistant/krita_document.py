@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -16,10 +17,12 @@ from krita import InfoObject
 
 from .image_pipeline import (
     DimensionError,
+    openai_mask_rgba_from_coverage,
     png_dimensions,
     require_coverage_size,
     require_same_size,
     write_png_gray,
+    write_png_rgba,
 )
 
 
@@ -195,3 +198,42 @@ def import_png_as_paint_layer(document, path: str | Path, layer_name: str | None
 def default_import_layer_name(when: datetime | None = None) -> str:
     stamp = (when or datetime.now()).strftime("%Y-%m-%d %H:%M")
     return f"AI Import {stamp}"
+
+
+def default_edit_layer_name(when: datetime | None = None) -> str:
+    stamp = (when or datetime.now()).strftime("%Y-%m-%d %H:%M")
+    return f"AI Edit {stamp}"
+
+
+def document_identity(document) -> tuple:
+    if document is None:
+        return ("", 0, 0)
+    path = document.fileName() or ""
+    if path:
+        name = os.path.basename(path)
+    else:
+        name = ""
+        if hasattr(document, "name"):
+            try:
+                name = document.name() or ""
+            except Exception:
+                name = ""
+        name = name or "Untitled"
+    return (name, document.width(), document.height())
+
+
+def export_openai_mask_png(document, path: str | Path) -> None:
+    if document is None:
+        raise NoDocumentError("Open a drawing first.")
+    selection = document.selection()
+    if selection is None:
+        raise NoSelectionError(
+            "There is no selection. Select an area first. "
+            "The plugin will not treat 'nothing selected' as 'edit everything'."
+        )
+    width = document.width()
+    height = document.height()
+    coverage = _as_bytes(selection.pixelData(0, 0, width, height))
+    rgba = openai_mask_rgba_from_coverage(coverage, width, height)
+    write_png_rgba(path, rgba, width, height)
+

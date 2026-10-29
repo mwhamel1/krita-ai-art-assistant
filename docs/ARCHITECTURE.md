@@ -1,33 +1,38 @@
 # Architecture
 
-AI Art Assistant is a Krita Python docker (side panel). There is no separate server in the first versions. The plugin talks to Krita on the UI thread and will later send pictures to OpenAI from a background job.
+AI Art Assistant is a Krita Python docker (side panel). There is no separate server. The plugin talks to Krita on the UI thread and sends pictures to OpenAI from a background thread.
 
 ## Pipeline
 
 ```
 visible canvas capture
         +
-selection stencil (optional)
+selection stencil (optional, inverted for OpenAI)
         |
         v
-local composite (keep unselected pixels unchanged)  [not in this version]
+HTTPS POST /v1/images/edits  (one click, one image)
         |
         v
-new Krita paint layer (undoable)
+candidate preview
+        |
+        v
+new Krita paint layer if you Apply (undoable)
 ```
 
-The cloud model is guidance only. The plugin is responsible for not applying pixels outside the selection (later version). Phase 1 imports the PNG as a full overlay layer.
+The OpenAI mask is guidance. This version does not yet clip applied pixels to the selection.
 
-## Modules (current and planned)
+## Modules
 
 | Piece | Role | Status |
 |---|---|---|
 | Plugin bootstrap (`__init__.py`, `.desktop`) | Register the docker with Krita | Phase 0 |
-| Panel (`docker.py`) | Document info, export, import, preview | Phase 1 |
+| Panel (`docker.py`) | Document info, export, import, Generate, preview | Phase 2 |
 | Krita document adapter (`krita_document.py`) | Projection, selection, layer insert | Phase 1 |
-| Image pipeline (`image_pipeline.py`) | PNG size checks, coverage stencil | Phase 1 |
-| OpenAI adapter | Image Edit HTTPS calls | Phase 2 |
-| Job coordinator | One paid request per click, ignore stale results | Phase 2–3 |
+| Image pipeline (`image_pipeline.py`) | PNG size checks, coverage, OpenAI mask invert | Phase 2 |
+| Prompts (`prompts.py`) | Base prompt + rules + instruction | Phase 2 |
+| Credentials (`credentials.py`) | Windows Credential Manager / session key | Phase 2 |
+| Settings (`settings.py`) | Non-secret defaults in AppData JSON | Phase 2 |
+| OpenAI adapter (`openai_provider.py`) | Stdlib HTTPS Image Edit | Phase 2 |
 | Strict selection composite | Clip applied pixels to the stencil | Phase 3 |
 
 ## Development install
